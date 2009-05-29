@@ -1,29 +1,12 @@
 import urllib
 import xml.dom.minidom
-import BeautifulSoup
 
-from twisted.internet import defer, reactor
-from twisted.web import client
-from twisted.internet.error import DNSLookupError
+from twisted.internet import defer
+from twisted.web import client, error
+from twisted import internet
+from twisted.python import failure
 
 BASE_URL = "http://api.longurl.org/v1/"
-
-class MyClient:
-    def getPageWithLocation(self, url, contextFactory=None, *args, **kwargs):
-        factory = client._makeGetterFactory(
-                   url,
-                   client.HTTPClientFactory,
-                   contextFactory=contextFactory,
-                   *args, **kwargs)
-        return factory.deferred.addCallback(lambda page: (page, factory.url)) \
-                               .addErrback(lambda e: e)
-    
-    def getPage(self, url, contextFactory=None, *args, **kwargs):
-        return client._makeGetterFactory(
-            url,
-            client.HTTPClientFactory,
-            contextFactory=contextFactory,
-            *args, **kwargs).deferred
 
 class ResponseFailure(Exception):
     pass
@@ -53,17 +36,16 @@ class Services(dict):
 
 class ExpandedURL(object):
 
-    def __init__(self, title, url):
-        self.title = title
+    def __init__(self, url):
         self.url = url
 
     def __repr__(self):
-        return "<<ExpandedURL title=%s url=%s>>" % (self.title, self.url)
+        return "<<ExpandedURL url=%s>>" % (self.url, )
 
 
 class LongUrl(object):
 
-    def __init__(self, agent='twisted-longurl', client=MyClient()):
+    def __init__(self, agent='twisted-longurl', client=client):
         self.agent = agent
         self.client = client
         
@@ -81,16 +63,18 @@ class LongUrl(object):
 
     def expand(self, u):
         """Expand a URL."""
-        
-        def gotResponse(t):
-            page, url = t
-            soup = BeautifulSoup.BeautifulSoup(page)
-            title = soup.title.string
-            rv.callback(ExpandedURL(title, url))
+       
+        def gotErr(failure):
+            f = failure.trap(error.PageRedirect, internet.error.DNSLookupError)
+            if f == error.PageRedirect:
+                rv.errback(ExpandedURL(failure.value.location))
+            elif f == internet.error.DNSLookupError:
+                rv.errback(ExpandedURL(u))
+            else:
+                rv.errback(failure)
         
         rv = defer.Deferred()
-        d = self.client.getPageWithLocation(u)
-        d.addCallback(gotResponse)
-        d.addErrback(lambda e: rv.errback(e))
-
+        d = self.client.getPage(u, followRedirect=0)
+        d.addErrback(gotErr)
+        d.addCallback(lambda page: rv.callback(ExpandedURL(u)))
         return rv

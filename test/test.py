@@ -7,7 +7,6 @@ import xml
 
 from twisted.trial import unittest
 from twisted.internet import defer
-from twisted.internet.error import DNSLookupError
 
 sys.path.extend(['lib', '../lib'])
 import longurl
@@ -25,12 +24,8 @@ class ParsingTest(unittest.TestCase):
         errMsgs = document.getElementsByTagName('messages')
         if errMsgs:
             raise ResponseFailure(errMsgs[0].firstChild.data)
-        try:
-            self.title = document.getElementsByTagName('title')[0].firstChild.data
-        except IndexError:
-            self.title = None
         self.url = document.getElementsByTagName('long_url')[0].firstChild.data
-        return parser(self.title, self.url)
+        return parser(self.url)
         
     def testServiceList(self):
         s = self.__parse("services.xml", longurl.Services)
@@ -43,7 +38,6 @@ class ParsingTest(unittest.TestCase):
 
     def testExpandedURL(self):
         s = self.__parse_l("expand.xml", longurl.ExpandedURL)
-        self.assertEquals('Invalid Item', s.title)
         self.assertEquals('http://cgi.ebay.com/aw-cgi/eBayISAPI.dll?ViewItem&item=1698262135',
                           s.url)
         # Just verifies the repr produces something.
@@ -57,10 +51,7 @@ class FakeHTTP(object):
 
     def getPage(self, *args, **kwargs):
         return self.d
-    
-    def getPageWithLocation(self, *args, **kwargs):
-        return self.rv
-    
+   
 def load_data(fn):
     with open("../" + fn) as f:
         return f.read()
@@ -110,13 +101,12 @@ class ExpansionRequestTest(unittest.TestCase):
     def testOKRequest(self):
         fh = FakeHTTP()
         lu = longurl.LongUrl(client=fh)
-        d = lu.expand('http://whatever/')
+        d = lu.expand('http://tinyurl.com/dehdc')
         def checkResult(s):
-            self.assertEquals('Invalid Item', s.title)
             self.assertEquals(
-                'http://cgi.ebay.com/aw-cgi/eBayISAPI.dll?ViewItem&item=1698262135',
+                'http://www.google.com',
                 s.url)
 
-        d.addCallback(checkResult)
+        d.addErrback(checkResult)
         d.addErrback(lambda e: self.fail(str(e)))
         fh.d.callback(load_data("expand.xml"))
