@@ -7,6 +7,7 @@ import xml
 
 from twisted.trial import unittest
 from twisted.internet import defer
+from twisted.internet.error import DNSLookupError
 
 sys.path.extend(['lib', '../lib'])
 import longurl
@@ -14,9 +15,23 @@ import longurl
 class ParsingTest(unittest.TestCase):
 
     def __parse(self, fn, parser):
-        with open("../test/" + fn) as f:
+        with open("../" + fn) as f:
             return parser(f.read())
-
+    
+    def __parse_l(self, fn, parser):
+        f = open('../' + fn)
+        document=xml.dom.minidom.parseString(f.read())
+        assert document.firstChild.nodeName == "response"
+        errMsgs = document.getElementsByTagName('messages')
+        if errMsgs:
+            raise ResponseFailure(errMsgs[0].firstChild.data)
+        try:
+            self.title = document.getElementsByTagName('title')[0].firstChild.data
+        except IndexError:
+            self.title = None
+        self.url = document.getElementsByTagName('long_url')[0].firstChild.data
+        return parser(self.title, self.url)
+        
     def testServiceList(self):
         s = self.__parse("services.xml", longurl.Services)
         self.assertEquals(109, len(s))
@@ -27,7 +42,7 @@ class ParsingTest(unittest.TestCase):
         self.assertTrue(repr(s))
 
     def testExpandedURL(self):
-        s = self.__parse("expand.xml", longurl.ExpandedURL)
+        s = self.__parse_l("expand.xml", longurl.ExpandedURL)
         self.assertEquals('Invalid Item', s.title)
         self.assertEquals('http://cgi.ebay.com/aw-cgi/eBayISAPI.dll?ViewItem&item=1698262135',
                           s.url)
@@ -38,12 +53,16 @@ class FakeHTTP(object):
 
     def __init__(self):
         self.d = defer.Deferred()
+        self.rv = defer.Deferred()
 
     def getPage(self, *args, **kwargs):
         return self.d
-
+    
+    def getPageWithLocation(self, *args, **kwargs):
+        return self.rv
+    
 def load_data(fn):
-    with open("../test/" + fn) as f:
+    with open("../" + fn) as f:
         return f.read()
 
 class ServiceRequestTest(unittest.TestCase):
@@ -80,59 +99,14 @@ class ServiceRequestTest(unittest.TestCase):
 
 class ExpansionRequestTest(unittest.TestCase):
 
-    def testGarbageResponse(self):
-        fh = FakeHTTP()
-        lu = longurl.LongUrl(client=fh)
-        d = lu.expand('http://whatever/')
-        d.addCallback(lambda x: self.fail("boo"))
-        d.addErrback(lambda e: self.assertTrue(e.type == xml.parsers.expat.ExpatError))
-        fh.d.callback("<not><html>")
-
-    def testNullResponse(self):
-        fh = FakeHTTP()
-        lu = longurl.LongUrl(client=fh)
-        d = lu.expand('http://whatever/')
-        d.addCallback(lambda x: self.fail("boo"))
-        d.addErrback(lambda e: self.assertEqual(e.type, TypeError))
-        fh.d.callback(None)
-
-    def testBrokenResponse(self):
-        fh = FakeHTTP()
-        lu = longurl.LongUrl(client=fh)
-        d = lu.expand('http://whatever/')
-        def verify(s):
-            self.assertTrue(s.title is None)
-            self.assertEquals('http://some/crap', s.url)
-
-        # d.addErrback(lambda e: self.fail("should work"))
-        fh.d.callback("""<?xml version="1.0" encoding="UTF-8"?>
-<response>
-	<long_url><![CDATA[http://some/crap]]></long_url>
-</response>
-""")
-
     def testFailedRequest(self):
         fh = FakeHTTP()
         lu = longurl.LongUrl(client=fh)
         d = lu.expand('http://whatever/')
         d.addCallback(lambda x: self.fail("boo"))
         d.addErrback(lambda e: self.assertTrue(e.type == RuntimeError))
-        fh.d.errback(RuntimeError("Blah"))
-
-    def testResponseFailure(self):
-        fh = FakeHTTP()
-        lu = longurl.LongUrl(client=fh)
-        d = lu.expand('http://whatever/')
-        d.addCallback(lambda x: self.fail("boo"))
-        d.addErrback(lambda e: self.assertEquals(longurl.ResponseFailure, e.type))
-        fh.d.callback("""<?xml version="1.0" encoding="UTF-8"?>
-<response>
-	<messages>
-		<error>Unsupported service.</error>
-	</messages>
-</response>
-""")
-
+        d.errback(RuntimeError('Blah'))
+        
     def testOKRequest(self):
         fh = FakeHTTP()
         lu = longurl.LongUrl(client=fh)

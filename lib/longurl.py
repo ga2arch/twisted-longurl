@@ -1,10 +1,29 @@
 import urllib
 import xml.dom.minidom
+import BeautifulSoup
 
-from twisted.internet import defer
+from twisted.internet import defer, reactor
 from twisted.web import client
+from twisted.internet.error import DNSLookupError
 
 BASE_URL = "http://api.longurl.org/v1/"
+
+class MyClient:
+    def getPageWithLocation(self, url, contextFactory=None, *args, **kwargs):
+        factory = client._makeGetterFactory(
+                   url,
+                   client.HTTPClientFactory,
+                   contextFactory=contextFactory,
+                   *args, **kwargs)
+        return factory.deferred.addCallback(lambda page: (page, factory.url)) \
+                               .addErrback(lambda e: e)
+    
+    def getPage(self, url, contextFactory=None, *args, **kwargs):
+        return client._makeGetterFactory(
+            url,
+            client.HTTPClientFactory,
+            contextFactory=contextFactory,
+            *args, **kwargs).deferred.addErrback(lambda e: e)
 
 class ResponseFailure(Exception):
     pass
@@ -34,27 +53,20 @@ class Services(dict):
 
 class ExpandedURL(object):
 
-    def __init__(self, content):
-        document=xml.dom.minidom.parseString(content)
-        assert document.firstChild.nodeName == "response"
-        errMsgs = document.getElementsByTagName('messages')
-        if errMsgs:
-            raise ResponseFailure(errMsgs[0].firstChild.data)
-        try:
-            self.title = document.getElementsByTagName('title')[0].firstChild.data
-        except IndexError:
-            self.title = None
-        self.url = document.getElementsByTagName('long_url')[0].firstChild.data
+    def __init__(self, title, url):
+        self.title = title
+        self.url = url
 
     def __repr__(self):
         return "<<ExpandedURL title=%s url=%s>>" % (self.title, self.url)
 
+
 class LongUrl(object):
 
-    def __init__(self, agent='twisted-longurl', client=client):
+    def __init__(self, agent='twisted-longurl', client=MyClient()):
         self.agent = agent
         self.client = client
-
+        
     def getServices(self):
         """Get a dict of known services.
 
@@ -69,11 +81,16 @@ class LongUrl(object):
 
     def expand(self, u):
         """Expand a URL."""
-
+        
+        def gotResponse(t):
+            page, url = t
+            soup = BeautifulSoup.BeautifulSoup(page)
+            title = soup.title.string
+            rv.callback(ExpandedURL(title, url))
+        
         rv = defer.Deferred()
-        d = self.client.getPage(BASE_URL + 'expand?url=' + urllib.quote(u),
-                                agent=self.agent)
-        d.addCallback(lambda res: rv.callback(ExpandedURL(res)))
+        d = self.client.getPageWithLocation(u)
+        d.addCallback(gotResponse)
         d.addErrback(lambda e: rv.errback(e))
 
         return rv
