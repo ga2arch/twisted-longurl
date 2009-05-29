@@ -23,7 +23,7 @@ class MyClient:
             url,
             client.HTTPClientFactory,
             contextFactory=contextFactory,
-            *args, **kwargs).deferred.addErrback(lambda e: e)
+            *args, **kwargs).deferred
 
 class ResponseFailure(Exception):
     pass
