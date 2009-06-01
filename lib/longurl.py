@@ -1,7 +1,7 @@
 import urllib
 import xml.dom.minidom
 
-from twisted.internet import defer
+from twisted.internet import defer, reactor
 from twisted.web import client, error
 from twisted import internet
 from twisted.python import failure
@@ -75,6 +75,12 @@ class LongUrl(object):
         d = self.client.getPage(u, followRedirect=0)
         d.addErrback(gotRedirect)
         d.addErrback(gotError)
+        d.addCallback(lambda p: rv.callback(ExpandedURL(u)))
         return rv
-        
 
+def p(d):
+    print d
+    
+a = LongUrl()
+a.expand('http://www.google.it').addCallback(p)
+reactor.run()
