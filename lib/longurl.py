@@ -64,17 +64,17 @@ class LongUrl(object):
     def expand(self, u):
         """Expand a URL."""
        
-        def gotErr(failure):
-            f = failure.trap(error.PageRedirect, internet.error.DNSLookupError)
-            if f == error.PageRedirect:
-                rv.errback(ExpandedURL(failure.value.location))
-            elif f == internet.error.DNSLookupError:
-                rv.errback(ExpandedURL(u))
-            else:
-                rv.errback(failure)
-        
+        def gotRedirect(failure):
+            failure.trap(error.PageRedirect)
+            rv.callback(ExpandedURL(failure.value.location))
+
+        def gotError(failure):
+            rv.callback(ExpandedURL(u))
+
         rv = defer.Deferred()
         d = self.client.getPage(u, followRedirect=0)
-        d.addErrback(gotErr)
-        d.addCallback(lambda page: rv.callback(ExpandedURL(u)))
+        d.addErrback(gotRedirect)
+        d.addErrback(gotError)
         return rv
+        
+
